@@ -47,18 +47,23 @@ BLOCK_PATTERNS = [
     r'\bmkfs\b',                    # format filesystem
 ]
 
-# Git subcommands that are purely read-only.
+# Git subcommands that are purely read-only OR routine writes that ship
+# work normally (add/commit/push/pull). Destructive operations stay in
+# GIT_WRITE below. force-push patterns are intercepted before this
+# whitelist applies — see git_safe().
 GIT_READ = {
     'status', 'log', 'diff', 'show', 'branch', 'tag', 'remote',
     'ls-files', 'ls-remote', 'config', 'rev-parse', 'describe',
     'stash', 'reflog', 'shortlog', 'cat-file', 'for-each-ref',
     'worktree', 'blame', 'check-ignore', 'merge-base', 'name-rev',
     'symbolic-ref', 'fetch', 'submodule', 'archive',
+    # Routine writes — auto-approved (force-push still blocked).
+    'add', 'commit', 'push', 'pull',
 }
 
-# Git subcommands that modify state — keep prompted.
+# Git subcommands that modify state more aggressively — keep prompted.
 GIT_WRITE = {
-    'add', 'commit', 'push', 'pull', 'merge', 'rebase', 'reset',
+    'merge', 'rebase', 'reset',
     'checkout', 'switch', 'restore', 'cherry-pick', 'revert',
     'rm', 'mv', 'clean', 'apply', 'am', 'bisect', 'init', 'clone',
 }
@@ -66,6 +71,13 @@ GIT_WRITE = {
 # ── Per-command checkers ───────────────────────────────────────────────────────
 
 def git_safe(stage: str) -> bool:
+    # Block force-push regardless of subcommand position (catches `git push -f`,
+    # `git push --force`, `git push --force-with-lease`, `git push +branch`).
+    if re.search(r'\bgit\s+push\b', stage):
+        if re.search(r'(--force(-with-lease)?|\s-f\b)', stage): return False
+        # `git push remote +ref` (the leading + means force on that refspec)
+        if re.search(r'\bgit\s+push\s+\S+\s+\+', stage): return False
+
     tokens = stage.split()
     i = 1
     while i < len(tokens):
